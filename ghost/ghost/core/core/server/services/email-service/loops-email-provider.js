@@ -1,6 +1,28 @@
 const logging = require('@tryghost/logging');
 const errors = require('@tryghost/errors');
 const debug = require('@tryghost/debug')('email-service:loops-provider-service');
+const crypto = require('crypto');
+
+function base64url(value) {
+    return Buffer.from(value).toString('base64url');
+}
+
+function getTrackedPostUrl(postUrl, email) {
+    const secret = process.env.NEWSLETTER_TRACKING_SECRET;
+    const storefrontUrl = process.env.STOREFRONT_URL;
+
+    if (!secret || !storefrontUrl || !postUrl) {
+        return postUrl;
+    }
+
+    const payload = base64url(JSON.stringify({
+        email,
+        postUrl,
+        exp: Date.now() + (30 * 24 * 60 * 60 * 1000)
+    }));
+    const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+    return `${storefrontUrl.replace(/\/$/, '')}/api/newsletter/track?token=${payload}.${signature}`;
+}
 
 /**
  * @typedef {object} Recipient
@@ -139,7 +161,7 @@ class LoopsEmailProvider {
                             replyTo: replyTo || '',
                             ...recipientVariables,
                             firstName: recipientVariables.firstName || recipientVariables.first_name || 'there',
-                            postUrl: postUrl || ''
+                            postUrl: getTrackedPostUrl(postUrl, recipient.email) || ''
                         }
                     });
                 }
