@@ -43,6 +43,10 @@ async function markGhostEmailOpened(data: { email: string; emailId?: string; pos
     if (!recipient) return
 
     await db.execute("UPDATE email_recipients SET opened_at = COALESCE(opened_at, UTC_TIMESTAMP()) WHERE id = ?", [recipient.id])
+    await db.execute(
+      "UPDATE emails SET opened_count = (SELECT COUNT(*) FROM email_recipients WHERE email_id = ? AND opened_at IS NOT NULL) WHERE id = ?",
+      [data.emailId, data.emailId]
+    )
     const [emails] = await db.execute("SELECT post_id FROM emails WHERE id = ? LIMIT 1", [data.emailId])
     const postId = (emails as Array<{ post_id: string | null }>)[0]?.post_id || null
     const redirectId = crypto.randomBytes(12).toString("hex")
