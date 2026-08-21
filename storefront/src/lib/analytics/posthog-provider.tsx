@@ -19,6 +19,14 @@ function PostHogPageView() {
       const search = searchParams.toString()
       if (search) url += `?${search}`
       ph.capture("$pageview", { $current_url: url })
+
+      if (pathname.startsWith("/blog/") && pathname.split("/").length >= 4) {
+        ph.capture("journal_viewed", {
+          $current_url: url,
+          journal_path: pathname,
+          journal_slug: pathname.split("/").pop(),
+        })
+      }
     }
   }, [pathname, searchParams, ph])
 
