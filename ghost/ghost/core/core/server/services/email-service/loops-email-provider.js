@@ -7,7 +7,7 @@ function base64url(value) {
     return Buffer.from(value).toString('base64url');
 }
 
-function getTrackedPostUrl(postUrl, email) {
+function getTrackedPostUrl(postUrl, email, emailId) {
     const secret = process.env.NEWSLETTER_TRACKING_SECRET;
     const storefrontUrl = process.env.STOREFRONT_URL;
 
@@ -18,6 +18,7 @@ function getTrackedPostUrl(postUrl, email) {
     const payload = base64url(JSON.stringify({
         email,
         postUrl,
+        emailId,
         exp: Date.now() + (30 * 24 * 60 * 60 * 1000)
     }));
     const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
@@ -161,7 +162,7 @@ class LoopsEmailProvider {
                             replyTo: replyTo || '',
                             ...recipientVariables,
                             firstName: recipientVariables.firstName || recipientVariables.first_name || 'there',
-                            postUrl: getTrackedPostUrl(postUrl, recipient.email) || ''
+                            postUrl: getTrackedPostUrl(postUrl, recipient.email, emailId) || ''
                         }
                     });
                 }

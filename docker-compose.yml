@@ -79,6 +79,10 @@ services:
       - GHOST_CONTENT_API_KEY=bb51767f201461be145ab3f74b
       - REVALIDATE_SECRET=supersecret
       - NEWSLETTER_TRACKING_SECRET=${NEWSLETTER_TRACKING_SECRET:-local-newsletter-tracking-secret}
+      - GHOST_DB_HOST=ghost-db
+      - GHOST_DB_USER=ghost
+      - GHOST_DB_PASSWORD=${GHOST_DB_PASSWORD:-ghostpass}
+      - GHOST_DB_NAME=ghostdb
     entrypoint:
       - /bin/sh
       - -c
