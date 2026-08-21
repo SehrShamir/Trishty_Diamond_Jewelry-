@@ -108,6 +108,7 @@ class LoopsEmailProvider {
             plaintext,
             from,
             replyTo,
+            postUrl,
             emailId,
             recipients
         } = data;
@@ -137,7 +138,8 @@ class LoopsEmailProvider {
                             fromEmail: from || '',
                             replyTo: replyTo || '',
                             ...recipientVariables,
-                            firstName: recipientVariables.firstName || recipientVariables.first_name || 'there'
+                            firstName: recipientVariables.firstName || recipientVariables.first_name || 'there',
+                            postUrl: postUrl || ''
                         }
                     });
                 }
