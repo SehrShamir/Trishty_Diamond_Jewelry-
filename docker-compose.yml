@@ -119,6 +119,7 @@ services:
       - ./ghost/ghost/core/core/server/api/endpoints/utils/serializers/input/settings.js:/var/lib/ghost/versions/5.130.6/core/server/api/endpoints/utils/serializers/input/settings.js
       - ./ghost/ghost/core/core/server/services/email-service/email-service-wrapper.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/email-service-wrapper.js
       - ./ghost/ghost/core/core/server/services/email-service/loops-email-provider.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/loops-email-provider.js
+      - ./ghost/ghost/core/core/server/services/public-config/config.js:/var/lib/ghost/versions/5.130.6/core/server/services/public-config/config.js
     depends_on:
       ghost-db:
         condition: service_healthy
