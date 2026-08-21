@@ -112,6 +112,7 @@ services:
       LOOPS_API_KEY: ${LOOPS_API_KEY:-48df72db645b9b4673658d5292caeb28}
       LOOPS_TRANSACTIONAL_ID: ${LOOPS_TRANSACTIONAL_ID:-cmt1nffkv085n0j4blworx13a}
       email_provider: loops
+      STOREFRONT_URL: ${STOREFRONT_URL:-http://localhost:8001}
     volumes:
       - ./ghost-content:/var/lib/ghost/content
       - ./ghost-content/patch/index-BVxh86CD.mjs:/var/lib/ghost/versions/5.130.6/core/built/admin/assets/admin-x-settings/index-BVxh86CD.mjs

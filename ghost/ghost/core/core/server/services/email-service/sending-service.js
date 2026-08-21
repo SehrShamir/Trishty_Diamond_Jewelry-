@@ -136,11 +136,17 @@ class SendingService {
         }
 
         const recipients = this.buildRecipients(members, emailBody.replacements);
+        const slug = post.get('slug');
+        const tag = post.related('primary_tag')?.get('slug') || 'journal';
+        const postUrl = post.get('url') || (slug && process.env.STOREFRONT_URL
+            ? `${process.env.STOREFRONT_URL.replace(/\/$/, '')}/blog/${tag}/${slug}`
+            : 'https://trishty.com/blog');
+
         return await this.#emailProvider.send({
             subject: this.#emailRenderer.getSubject(post, isTestEmail),
             from: this.#emailRenderer.getFromAddress(post, newsletter, !!options.useFallbackAddress),
             replyTo: this.#emailRenderer.getReplyToAddress(post, newsletter, !!options.useFallbackAddress) ?? undefined,
-            postUrl: post.get('url') || '',
+            postUrl,
             html: emailBody.html,
             plaintext: emailBody.plaintext,
             recipients,
