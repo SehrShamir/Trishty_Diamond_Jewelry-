@@ -1,0 +1,196 @@
+const debug = require('@tryghost/debug')('i18n');
+const logging = require('@tryghost/logging');
+const url = require('../../api/endpoints/utils/serializers/output/utils/url');
+const events = require('../../lib/common/events');
+
+class EmailServiceWrapper {
+    getPostUrl(post) {
+        const jsonModel = post.toJSON();
+        url.forPost(post.id, jsonModel, {options: {}});
+        return jsonModel.url;
+    }
+
+    init() {
+        if (this.service) {
+            return;
+        }
+
+        const EmailService = require('./EmailService');
+        const EmailController = require('./EmailController');
+        const EmailRenderer = require('./EmailRenderer');
+        const SendingService = require('./SendingService');
+        const BatchSendingService = require('./BatchSendingService');
+        const EmailSegmenter = require('./EmailSegmenter');
+        const MailgunEmailProvider = require('./MailgunEmailProvider');
+        const LoopsEmailProvider = require('./LoopsEmailProvider');
+        // Ghost 5.130.6 does not ship the newer domain-warming module.
+        const DomainWarmingService = class {
+            isEnabled() {
+                return false;
+            }
+
+            async getWarmupLimit(emailCount) {
+                return emailCount;
+            }
+        };
+
+        const {Post, Newsletter, Email, EmailBatch, EmailRecipient, Member} = require('../../models');
+         const MailgunClient = require('../lib/MailgunClient');
+        const configService = require('../../../shared/config');
+        const settingsCache = require('../../../shared/settings-cache');
+        const settingsHelpers = require('../settings-helpers');
+        const jobsService = require('../jobs');
+        const membersService = require('../members');
+        const db = require('../../data/db');
+        const sentry = require('../../../shared/sentry');
+        const membersRepository = membersService.api.members;
+        const limitService = require('../limits');
+        const labs = require('../../../shared/labs');
+        const emailAddressService = require('../email-address');
+        const i18nLib = require('@tryghost/i18n');
+        const mobiledocLib = require('../../lib/mobiledoc');
+        const lexicalLib = require('../../lib/lexical');
+        const urlUtils = require('../../../shared/url-utils');
+        const memberAttribution = require('../member-attribution');
+        const linkReplacer = require('../lib/link-replacer');
+        const linkTracking = require('../link-tracking');
+        const audienceFeedback = require('../audience-feedback');
+        const storageUtils = require('../../adapters/storage/utils');
+        const emailAnalyticsJobs = require('../email-analytics/jobs');
+        const {cachedImageSizeFromUrl} = require('../../lib/image');
+
+        // capture errors from mailgun client and log them in sentry
+        const errorHandler = (error) => {
+            logging.info(`Capturing error for email provider service`);
+            sentry.captureException(error);
+        };
+
+        // Mailgun client instance for email provider
+        const mailgunClient = new MailgunClient({
+            config: configService, settings: settingsCache, labs
+        });
+        const i18nLanguage = settingsCache.get('locale') || 'en';
+        const i18n = i18nLib(i18nLanguage, 'ghost');
+
+        events.on('settings.locale.edited', (model) => {
+            debug('locale changed, updating i18n to', model.get('value'));
+            i18n.changeLanguage(model.get('value'));
+        });
+
+        const mailgunEmailProvider = new MailgunEmailProvider({
+            mailgunClient,
+            errorHandler
+        });
+
+        const loopsEmailProvider = new LoopsEmailProvider({
+            apiKey: settingsCache.get('loops_api_key') || process.env.LOOPS_API_KEY,
+            transactionalId: settingsCache.get('loops_transactional_id') || process.env.LOOPS_TRANSACTIONAL_ID,
+            userGroup: settingsCache.get('loops_user_group') || 'Newsletter',
+            errorHandler
+        });
+
+        const dynamicEmailProvider = {
+            get activeProvider() {
+                const configuredProvider = settingsCache.get('email_provider');
+                const hasLoops = Boolean(settingsCache.get('loops_api_key') || process.env.LOOPS_API_KEY);
+                const hasMailgun = Boolean(settingsCache.get('mailgun_api_key') || (configService.get('bulkEmail') && configService.get('bulkEmail').mailgun));
+
+                if (configuredProvider === 'loops' || hasLoops || !hasMailgun) {
+                    return loopsEmailProvider;
+                }
+                return mailgunEmailProvider;
+            },
+            send(data, options) {
+                return this.activeProvider.send(data, options);
+            },
+            getMaximumRecipients() {
+                return this.activeProvider.getMaximumRecipients();
+            },
+            getTargetDeliveryWindow() {
+                return this.activeProvider.getTargetDeliveryWindow();
+            }
+        };
+
+        const emailRenderer = new EmailRenderer({
+            settingsCache,
+            settingsHelpers,
+            renderers: {
+                mobiledoc: mobiledocLib,
+                lexical: lexicalLib
+            },
+            imageSize: cachedImageSizeFromUrl,
+            urlUtils,
+            storageUtils,
+            getPostUrl: this.getPostUrl,
+            linkReplacer,
+            linkTracking,
+            memberAttributionService: memberAttribution.service,
+            audienceFeedbackService: audienceFeedback.service,
+            outboundLinkTagger: memberAttribution.outboundLinkTagger,
+            emailAddressService: emailAddressService.service,
+            labs,
+            models: {Post},
+            t: i18n.t
+        });
+
+        const sendingService = new SendingService({
+            emailProvider: dynamicEmailProvider,
+            emailRenderer,
+            emailAddressService: emailAddressService.service
+        });
+
+        const emailSegmenter = new EmailSegmenter({
+            membersRepository
+        });
+
+        const domainWarmingService = new DomainWarmingService({
+            models: {Email},
+            config: configService
+        });
+
+        const batchSendingService = new BatchSendingService({
+            sendingService,
+            models: {
+                EmailBatch,
+                EmailRecipient,
+                Email,
+                Member
+            },
+            jobsService,
+            emailSegmenter,
+            emailRenderer,
+            domainWarmingService,
+            db,
+            sentry,
+            debugStorageFilePath: configService.getContentPath('data')
+        });
+
+        this.renderer = emailRenderer;
+
+        this.service = new EmailService({
+            batchSendingService,
+            sendingService,
+            models: {
+                Email
+            },
+            settingsCache,
+            emailRenderer,
+            emailSegmenter,
+            limitService,
+            membersRepository,
+            verificationTrigger: membersService.verificationTrigger,
+            emailAnalyticsJobs,
+            domainWarmingService
+        });
+
+        this.controller = new EmailController(this.service, {
+            models: {
+                Post,
+                Newsletter,
+                Email
+            }
+        });
+    }
+}
+
+module.exports = EmailServiceWrapper;

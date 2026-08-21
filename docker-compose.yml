@@ -78,6 +78,11 @@ services:
       - GHOST_URL=http://ghost:2368
       - GHOST_CONTENT_API_KEY=bb51767f201461be145ab3f74b
       - REVALIDATE_SECRET=supersecret
+      - NEWSLETTER_TRACKING_SECRET=${NEWSLETTER_TRACKING_SECRET:-local-newsletter-tracking-secret}
+      - GHOST_DB_HOST=ghost-db
+      - GHOST_DB_USER=ghost
+      - GHOST_DB_PASSWORD=${GHOST_DB_PASSWORD:-ghostpass}
+      - GHOST_DB_NAME=ghostdb
     entrypoint:
       - /bin/sh
       - -c
@@ -112,13 +117,17 @@ services:
       LOOPS_API_KEY: ${LOOPS_API_KEY:-48df72db645b9b4673658d5292caeb28}
       LOOPS_TRANSACTIONAL_ID: ${LOOPS_TRANSACTIONAL_ID:-cmt1nffkv085n0j4blworx13a}
       email_provider: loops
+      STOREFRONT_URL: ${STOREFRONT_URL:-http://localhost:8001}
+      NEWSLETTER_TRACKING_SECRET: ${NEWSLETTER_TRACKING_SECRET:-local-newsletter-tracking-secret}
     volumes:
       - ./ghost-content:/var/lib/ghost/content
       - ./ghost-content/patch/index-BVxh86CD.mjs:/var/lib/ghost/versions/5.130.6/core/built/admin/assets/admin-x-settings/index-BVxh86CD.mjs
       - ./ghost/ghost/core/core/server/data/schema/default-settings/default-settings.json:/var/lib/ghost/versions/5.130.6/core/server/data/schema/default-settings/default-settings.json
       - ./ghost/ghost/core/core/server/api/endpoints/utils/serializers/input/settings.js:/var/lib/ghost/versions/5.130.6/core/server/api/endpoints/utils/serializers/input/settings.js
-      - ./ghost/ghost/core/core/server/services/email-service/email-service-wrapper.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/email-service-wrapper.js
-      - ./ghost/ghost/core/core/server/services/email-service/loops-email-provider.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/loops-email-provider.js
+      - ./ghost/ghost/core/core/server/services/email-service/email-service-wrapper.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/EmailServiceWrapper.js
+      - ./ghost/ghost/core/core/server/services/email-service/loops-email-provider.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/LoopsEmailProvider.js
+      - ./ghost/ghost/core/core/server/services/email-service/sending-service.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/SendingService.js
+      - ./ghost/ghost/core/core/server/services/public-config/config.js:/var/lib/ghost/versions/5.130.6/core/server/services/public-config/config.js
     depends_on:
       ghost-db:
         condition: service_healthy
