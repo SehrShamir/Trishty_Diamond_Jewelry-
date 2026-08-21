@@ -1,0 +1,191 @@
+# ───────────────────────────────────────────────────────────────────
+#  Production stack — docker-compose.prod.yml
+#
+#  Reads env from ./.env on the server. On first deploy:
+#    cp .env.prod .env && edit .env (fill blanks)
+#    docker compose -f docker-compose.prod.yml up -d
+#
+#  Topology:
+#    - Dedicated network (172.19.3.0/24) with static IPs per service
+#    - Named volumes for all stateful data (no host mounts)
+#    - Optional cloudflared service for public access (set
+#      CLOUDFLARE_TUNNEL_TOKEN in .env to enable; omit to skip)
+#
+#  See docs/DEPLOY.md for the full activation checklist.
+# ───────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: medusa-docker-postgres
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      POSTGRES_DB: medusa
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      trishty-network:
+        ipv4_address: 172.19.3.10
+
+  redis:
+    image: redis:7
+    container_name: medusa-docker-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      trishty-network:
+        ipv4_address: 172.19.3.20
+
+  ghost-db:
+    image: mysql:8.0
+    container_name: medusa-docker-ghost-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GHOST_DB_ROOT_PASSWORD:-rootpass}
+      MYSQL_USER: ghost
+      MYSQL_PASSWORD: ${GHOST_DB_PASSWORD:-ghostpass}
+      MYSQL_DATABASE: ghostdb
+    volumes:
+      - ghost-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      trishty-network:
+        ipv4_address: 172.19.3.30
+
+  ghost:
+    image: ghost:latest
+    container_name: medusa-docker-ghost
+    restart: unless-stopped
+    ports:
+      - "2368:2368"
+    environment:
+      url: ${GHOST_PUBLIC_URL:-https://cms.trishty.com}
+      database__client: mysql
+      database__connection__host: ghost-db
+      database__connection__user: ghost
+      database__connection__password: ${GHOST_DB_PASSWORD:-ghostpass}
+      database__connection__database: ghostdb
+      NODE_ENV: production
+      email_provider: ${GHOST_EMAIL_PROVIDER:-loops}
+      LOOPS_API_KEY: ${LOOPS_API_KEY:-}
+      LOOPS_TRANSACTIONAL_ID: ${LOOPS_TRANSACTIONAL_ID:-}
+      bulkEmail__mailgun__apiKey: ${MAILGUN_API_KEY:-}
+      bulkEmail__mailgun__domain: ${MAILGUN_DOMAIN:-}
+      bulkEmail__mailgun__baseUrl: ${MAILGUN_BASE_URL:-https://api.mailgun.net/v3}
+      mail__transport: ${GHOST_MAIL_TRANSPORT:-Direct}
+      mail__from: ${GHOST_MAIL_FROM:-Trishty <hello@trishty.com>}
+      mail__options__service: ${GHOST_MAIL_SERVICE:-Mailgun}
+      mail__options__host: ${GHOST_MAIL_HOST:-smtp.mailgun.org}
+      mail__options__port: ${GHOST_MAIL_PORT:-465}
+      mail__options__secure: ${GHOST_MAIL_SECURE:-true}
+      mail__options__auth__user: ${GHOST_MAIL_USER:-}
+      mail__options__auth__pass: ${GHOST_MAIL_PASS:-}
+    volumes:
+      - ghost-content:/var/lib/ghost/content
+    depends_on:
+      ghost-db:
+        condition: service_healthy
+    networks:
+      trishty-network:
+        ipv4_address: 172.19.3.40
+
+  backend:
+    image: everythingtalentdeveloper/medusa-docker:backend
+    container_name: medusa-docker-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "9000:9000"
+    env_file:
+      - ./.env
+    environment:
+      # Internal Docker URLs (override .env — these never change)
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/medusa?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - shared-data:/shared
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    networks:
+      trishty-network:
+        ipv4_address: 172.19.3.50
+
+  storefront:
+    image: everythingtalentdeveloper/medusa-docker:storefront
+    container_name: medusa-docker-storefront
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env
+    environment:
+      # Internal Docker URLs for server-side fetching (override .env)
+      MEDUSA_BACKEND_URL: http://backend:9000
+      GHOST_URL: http://ghost:2368
+    volumes:
+      - shared-data:/shared
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      trishty-network:
+        ipv4_address: 172.19.3.60
+
+  # ── Cloudflare Tunnel (optional) ─────────────────────────────────
+  # Exposes storefront / backend / Ghost to the public internet via
+  # Cloudflare without opening ports on the host. Configure the
+  # tunnel routes (subdomains → local ports) in the Cloudflare
+  # dashboard. Omit this service by leaving CLOUDFLARE_TUNNEL_TOKEN
+  # empty — compose skips services with empty required env.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: medusa-docker-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    profiles: ["cloudflared"]
+    networks:
+      trishty-network:
+        ipv4_address: 172.19.3.70
+
+volumes:
+  pgdata:
+  shared-data:
+  ghost-content:
+  ghost-mysql-data:
+
+networks:
+  trishty-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.19.3.0/24
+          gateway: 172.19.3.1

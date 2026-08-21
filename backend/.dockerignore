@@ -1,0 +1,16 @@
+node_modules
+.medusa
+.cache
+dist
+coverage
+.git
+.gitignore
+.DS_Store
+*.log
+.env
+.env.test
+.env.*
+!.env.template
+README.md
+integration-tests
+.vscode

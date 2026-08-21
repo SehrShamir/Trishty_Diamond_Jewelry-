@@ -1,0 +1,20 @@
+node_modules
+.next
+.vscode
+.env
+.env.prod
+.env.dev
+.yarn
+
+# Runtime Ghost CMS content (DB, images, themes) — host-mounted, not source
+ghost-content/data/
+ghost-content/images/
+ghost-content/files/
+ghost-content/media/
+ghost-content/logs/
+ghost-content/settings/
+ghost-content/public/
+ghost-content/apps/
+ghost-content/themes/
+ghost-content/versions/
+ghost/ 

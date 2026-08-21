@@ -1,0 +1,155 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: medusa-docker-postgres
+    environment:
+      POSTGRES_DB: medusa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: medusa-docker-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    platform: linux/amd64
+    image: everythingtalentdeveloper/medusa-docker:backend
+    container_name: medusa-docker-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "9001:9000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - shared_data:/shared
+      - backend_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
+  storefront:
+    build: ./storefront
+    platform: linux/amd64
+    image: everythingtalentdeveloper/medusa-docker:storefront-dev
+    container_name: medusa-docker-storefront
+    volumes:
+      - ./storefront:/app
+      - storefront_node_modules:/app/node_modules
+      - storefront_next:/app/.next
+      - shared_data:/shared
+    depends_on:
+      backend:
+        condition: service_healthy
+      ghost:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    env_file:
+      - ./storefront/.env.local
+    environment:
+      - NODE_ENV=development
+      - LOOPS_API_KEY=48df72db645b9b4673658d5292caeb28
+      - LOOPS_TRANSACTIONAL_ID=cmt1nffkv085n0j4blworx13a
+      - GHOST_ADMIN_API_KEY=6a82ae67dab1d600017e8ed9:b710bc11fe19cfe665996d22bccbbdd55d6d04263c61d3d841fbc8afbb683333
+      - GHOST_URL=http://ghost:2368
+      - GHOST_CONTENT_API_KEY=bb51767f201461be145ab3f74b
+      - REVALIDATE_SECRET=supersecret
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY" ]; then
+          echo "Waiting for publishable key from backend..."
+          while [ ! -f /shared/publishable_key ] || [ ! -s /shared/publishable_key ]; do
+            sleep 3
+          done
+          export NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$$(cat /shared/publishable_key | tr -d '[:space:]')
+          echo "Got publishable key"
+        fi
+        yarn install
+        yarn dev
+
+  ghost:
+    image: ghost:5-alpine
+    container_name: medusa-docker-ghost
+    restart: unless-stopped
+    ports:
+      - "2368:2368"
+    environment:
+      url: ${GHOST_PUBLIC_URL:-http://localhost:2368}
+      database__client: mysql
+      database__connection__host: ghost-db
+      database__connection__user: ghost
+      database__connection__password: ${GHOST_DB_PASSWORD:-ghostpass}
+      database__connection__database: ghostdb
+      NODE_ENV: ${GHOST_NODE_ENV:-development}
+      mail__transport: stub
+      security__staffDeviceVerification: "false"
+      LOOPS_API_KEY: ${LOOPS_API_KEY:-48df72db645b9b4673658d5292caeb28}
+      LOOPS_TRANSACTIONAL_ID: ${LOOPS_TRANSACTIONAL_ID:-cmt1nffkv085n0j4blworx13a}
+      email_provider: loops
+    volumes:
+      - ./ghost-content:/var/lib/ghost/content
+      - ./ghost-content/patch/index-BVxh86CD.mjs:/var/lib/ghost/versions/5.130.6/core/built/admin/assets/admin-x-settings/index-BVxh86CD.mjs
+      - ./ghost/ghost/core/core/server/data/schema/default-settings/default-settings.json:/var/lib/ghost/versions/5.130.6/core/server/data/schema/default-settings/default-settings.json
+      - ./ghost/ghost/core/core/server/api/endpoints/utils/serializers/input/settings.js:/var/lib/ghost/versions/5.130.6/core/server/api/endpoints/utils/serializers/input/settings.js
+      - ./ghost/ghost/core/core/server/services/email-service/email-service-wrapper.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/email-service-wrapper.js
+      - ./ghost/ghost/core/core/server/services/email-service/loops-email-provider.js:/var/lib/ghost/versions/5.130.6/core/server/services/email-service/loops-email-provider.js
+    depends_on:
+      ghost-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2368/ghost/api/content/settings/?key=$${GHOST_HEALTHCHECK_KEY:-noop} >/dev/null 2>&1 || wget -qO- http://localhost:2368/ >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  ghost-db:
+    image: mysql:8.0
+    container_name: medusa-docker-ghost-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GHOST_DB_ROOT_PASSWORD:-rootpass}
+      MYSQL_USER: ghost
+      MYSQL_PASSWORD: ${GHOST_DB_PASSWORD:-ghostpass}
+      MYSQL_DATABASE: ghostdb
+    volumes:
+      - ghost_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${GHOST_DB_ROOT_PASSWORD:-rootpass}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  shared_data:
+  storefront_node_modules:
+  storefront_next:
+  backend_uploads:
+  ghost_mysql_data:
